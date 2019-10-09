@@ -7,7 +7,6 @@ import collections
 import time
 from collections import deque
 from tensorboardX import SummaryWriter
-import ray
 
 
 default_config = {

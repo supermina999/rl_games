@@ -582,3 +582,23 @@ def atari_a2c_network_lstm(name, inputs, actions_num, env_num, batch_num, contin
             return logits, value, states_ph, dones_ph, lstm_state, initial_state
 
 
+def default_ddpg_network(name, inputs, actions, actions_num, reuse=False):
+    with tf.variable_scope(name, reuse=reuse):
+        with tf.variable_scope("actor", reuse=reuse):
+            hidden0 = tf.layers.dense(inputs=inputs, units=64, activation=tf.nn.relu)
+            hidden1 = tf.layers.dense(inputs=hidden0, units=64, activation=tf.nn.relu)
+            #hidden2 = tf.layers.dense(inputs=hidden1, units=128, activation=tf.nn.relu)
+
+            out_actions = tf.layers.dense(inputs=hidden1, units=actions_num, activation=tf.nn.tanh)
+        
+        with tf.variable_scope("critic", reuse=reuse):
+            if actions is None:
+                actions = out_actions
+            #hiddena = tf.layers.dense(inputs=actions, units=128, activation=tf.nn.relu)
+            hidden0 = tf.layers.dense(inputs=inputs, units=64, activation=tf.nn.relu)
+            #merged = hidden0 + hiddena
+            merged = tf.concat([hidden0, actions], axis = 1)
+            hidden1 = tf.layers.dense(inputs=merged, units=64, activation=tf.nn.relu)
+            hidden2 = tf.layers.dense(inputs=hidden1, units=64, activation=tf.nn.relu)
+            value = tf.layers.dense(inputs=hidden2, units=1)
+    return out_actions, value

@@ -86,7 +86,7 @@ class DDPGAgent:
         self.atoms_num = self.config['ATOMS_NUM']
         self.is_distributional = self.atoms_num > 1
         self.noise = OUProcces(self.actions_num)
-
+        self.learning_rate = self.config['LEARNING_RATE']
         if self.is_distributional:
             self.v_min = self.config['V_MIN']
             self.v_max = self.config['V_MAX']
@@ -124,22 +124,24 @@ class DDPGAgent:
         self.sess.run(self.assigns_hard)
 
     def init_actor(self):
-        self.batch_size = self.config['BATCH_SIZE']
-        self.actor_grads = tf.gradients(ys=self.actions, xs=self.actor_weights, grad_ys=-self.a_grads_ph)
-        self.actor_grads = list(map(lambda x: tf.div(x, self.batch_size), self.actor_grads))
-        opt = tf.train.AdamOptimizer(self.learning_rate)
-        self.actor_train_step = opt.apply_gradients(zip(self.actor_grads, self.actor_weights))
+        self.actor_loss = tf.reduce_mean(-self.qvalues_loss)
+        self.actor_train_op = tf.train.AdamOptimizer(self.learning_rate)
+        grads = tf.gradients(self.actor_loss, self.actor_weights)
+        grads, _ = tf.clip_by_global_norm(grads, 0.5)
+        grads = list(zip(grads, self.actor_weights))
+        self.actor_train_step = self.actor_train_op.apply_gradients(grads)
 
     def init_critic(self):
         self.gamma_step = tf.constant(self.gamma**self.steps_num, dtype=tf.float32)
         self.reference_qvalues = self.rewards_ph + self.gamma_step * self.is_not_done * tf.stop_gradient(self.target_qvalues)
 
-        self.td_loss_mean = tf.losses.mean_squared_error(tf.stop_gradient(self.reference_qvalues), self.qvalues)
+        self.td_loss_mean = tf.losses.huber_loss(tf.stop_gradient(self.reference_qvalues), self.qvalues)
 
-        self.learning_rate = self.config['LEARNING_RATE']
-        self.critic_train_step = tf.train.AdamOptimizer(self.learning_rate).minimize(self.td_loss_mean, var_list=self.critic_weights)
-
-        self.a_grads = tf.gradients(self.qvalues, self.actions_ph)
+        self.critic_train_op = tf.train.AdamOptimizer(self.learning_rate)
+        grads = tf.gradients(self.td_loss_mean, self.critic_weights)
+        grads, _ = tf.clip_by_global_norm(grads, 0.5)
+        grads = list(zip(grads, self.critic_weights))
+        self.critic_train_step = self.critic_train_op.apply_gradients(grads)
 
     def setup_c51_qvalues(self, actions_num):
         self.qvalues_c51 = self.network('agent', self.obs_ph, actions_num)
@@ -153,6 +155,13 @@ class DDPGAgent:
             'actions_num' : actions_num
         }
 
+        agent_loss_dict = {
+            'name': 'agent',
+            'inputs' : self.obs_ph,
+            'actions' : None,
+            'actions_num' : actions_num
+        }
+
         target_dict = {
             'name' : 'target',
             'inputs' : self.next_obs_ph,
@@ -161,6 +170,7 @@ class DDPGAgent:
         }
 
         self.actions, self.qvalues = self.network(agent_dict)
+        _, self.qvalues_loss = self.network(agent_loss_dict, reuse=True)
         _, self.target_qvalues = self.network(target_dict)
 
         self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='agent')
@@ -200,8 +210,8 @@ class DDPGAgent:
         actions = self.sess.run(self.actions, {self.obs_ph: [state]})[0] 
         return actions
 
-    def get_action_noise(self, state):
-        actions = np.clip(self.sess.run(self.actions, {self.obs_ph: [state]}) + self.noise.get(), -1.0, 1.0)[0]
+    def get_action_noise(self, state, epsilon):
+        actions = np.clip(self.sess.run(self.actions, {self.obs_ph: [state]})[0] + self.noise.get() * epsilon, -1.0, 1.0)
         return actions
 
     def play_steps(self, steps, epsilon):
@@ -217,7 +227,7 @@ class DDPGAgent:
                 state = self.states[-1][0]
             else:
                 state = self.state
-            action = self.get_action_noise(state)
+            action = self.get_action_noise(state, epsilon)
             new_state, reward, is_done, _ = self.env.step(rescale_actions(self.actions_low, self.actions_high, action))
             new_state = np.squeeze(new_state)
             reward = reward * (1 - is_done)
@@ -281,6 +291,8 @@ class DDPGAgent:
         rewards = []
         shaped_rewards = []
         steps = []
+        c_losses = 0
+        a_losses = 0
         while True:
             t_play_start = time.time()
             self.epsilon = self.epsilon_processor(frame)
@@ -304,15 +316,10 @@ class DDPGAgent:
           
             batch, actor_batch = self.sample_batch(self.exp_buffer, batch_size=BATCH_SIZE)
 
-            _, loss_t = self.sess.run([self.critic_train_step, self.td_loss_mean], batch)
-            actions = self.sess.run(self.actions, actor_batch)
-            batch[self.actions_ph] = actions
-
-            a_grads = self.sess.run(self.a_grads, batch)[0]
-
-            actor_batch[self.a_grads_ph] = a_grads
-            _ = self.sess.run([self.actor_train_step], actor_batch)
-            
+            _, c_loss = self.sess.run([self.critic_train_step, self.td_loss_mean], batch)
+            _, a_loss = self.sess.run([self.actor_train_step, self.actor_loss], actor_batch)
+            c_losses += c_loss
+            a_losses += a_loss
             self.load_weigths_into_target_network()
 
             t_end = time.time()
@@ -320,13 +327,17 @@ class DDPGAgent:
 
 
 
-            if frame % 1000 == 0:
-                print('Frames per seconds: ', 1000 / (update_time + play_time))
-                self.writer.add_scalar('Frames per seconds: ', 1000 / (update_time + play_time), frame)
+            if frame % 1024 == 0:
+                print('Frames per seconds: ', 1024 / (update_time + play_time))
+                self.writer.add_scalar('Frames per seconds: ', 1024 / (update_time + play_time), frame)
                 self.writer.add_scalar('upd_time', update_time, frame)
                 self.writer.add_scalar('play_time', play_time, frame)
-                self.writer.add_scalar('loss', loss_t, frame)
+                self.writer.add_scalar('critic_loss', c_losses / 1024.0, frame)
+                self.writer.add_scalar('actor_loss', a_losses / 1024.0, frame)
                 self.writer.add_scalar('epsilon', self.epsilon, frame)
+                c_losses = 0
+                a_losses = 0
+
                 if self.is_prioritized:
                     self.writer.add_scalar('beta', self.beta, frame)
                     

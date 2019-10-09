@@ -163,3 +163,18 @@ class AtariNoisyDuelingDQN(object):
             return networks.noisy_dueling_dqn_network_with_batch_norm(name, inputs, actions_num, self.mean, self.std, reuse, self.dueling_type, is_train=self.is_train)
         else:
             return networks.noisy_dueling_dqn_network(name, inputs, actions_num, self.mean, self.std, reuse, self.dueling_type)
+
+
+
+class ModelDDPG(BaseModel):
+    def __init__(self, network):
+        self.network = network
+
+    def __call__(self, dict, reuse=False):
+        name = dict['name']
+        inputs_ph = dict['inputs']
+        actions_num = dict['actions_num']
+        actions_ph = dict['actions']
+        action, q_value = self.network(name, inputs_ph, actions_ph, actions_num, reuse)
+        return action, q_value
+        
