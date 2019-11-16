@@ -52,6 +52,8 @@ class A2CAgent:
         self.env_name = config['ENV_NAME']
         self.ppo = config['PPO']
         self.is_adaptive_lr = config['LR_SCHEDULE'] == 'ADAPTIVE'
+        # todo implement Spinup early stop variant
+        self.is_stop_lr = config['LR_SCHEDULE'] == 'STOP'
         self.is_polynom_decay_lr = config['LR_SCHEDULE'] == 'POLYNOM_DECAY'
         self.is_exp_decay_lr = config['LR_SCHEDULE'] == 'EXP_DECAY'
         self.lr_multiplier = tf.constant(1, shape=(), dtype=tf.float32)
@@ -93,7 +95,7 @@ class A2CAgent:
         self.update_epoch_op = self.epoch_num.assign(self.epoch_num + 1)
         self.current_lr = self.learning_rate_ph
 
-        if self.is_adaptive_lr:
+        if self.is_adaptive_lr or self.is_stop_lr:
             self.lr_threshold = config['LR_THRESHOLD']
         if self.is_polynom_decay_lr:
             self.lr_multiplier = tf.train.polynomial_decay(1.0, global_step=self.epoch_num, decay_steps=config['MAX_EPOCHS'], end_learning_rate=0.001, power=tr_helpers.get_or_default(config, 'DECAY_POWER', 1.0))
@@ -211,7 +213,6 @@ class A2CAgent:
             mb_mus.append(mu)
             mb_sigmas.append(sigma)
 
-
             self.obs[:], rewards, self.dones, infos = self.vec_env.step(rescale_actions(self.actions_low, self.actions_high, np.clip(actions, -1.0, 1.0)))
             self.current_rewards += rewards
 
@@ -219,7 +220,7 @@ class A2CAgent:
                 if done:
                     self.game_rewards.append(reward)
 
-            self.current_rewards = self.current_rewards * (1.0 -self.dones)
+            self.current_rewards = self.current_rewards * (1.0 - self.dones)
 
             shaped_rewards = self.rewards_shaper(rewards)
             epinfos.append(infos)
@@ -236,8 +237,7 @@ class A2CAgent:
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
         mb_states = np.asarray(mb_states, dtype=np.float32)
         last_values = self.get_values(self.obs)
-        last_values = np.squeeze(last_values)
-   
+        last_values = np.squeeze(last_values) 
 
         mb_returns = np.zeros_like(mb_rewards)
         mb_advs = np.zeros_like(mb_rewards)
@@ -276,13 +276,22 @@ class A2CAgent:
         mini_epochs_num = self.config['MINI_EPOCHS']
         num_minibatches = batch_size // minibatch_size
         last_lr = self.config['LEARNING_RATE']
+        
         frame = 0
+        total_time = 0
         update_time = 0
         last_mean_rewards = -100500
         play_time = 0
         epoch_num = 0
+
+        start_time = time.time()
+
         while True:
             play_time_start = time.time()
+            play_time_end = time.time()
+            play_time = play_time_end - play_time_start
+            update_time_start = time.time()
+
             epoch_num = self.update_epoch()
             frame += batch_size
             obses, returns, dones, actions, values, neglogpacs, mus, sigmas, lstm_states, _ = self.play_steps()
@@ -294,9 +303,7 @@ class A2CAgent:
             c_losses = []
             entropies = []
             kls = []
-            play_time_end = time.time()
-            play_time = play_time_end - play_time_start
-            update_time_start = time.time()
+
             if self.network.is_rnn():
                 total_games = batch_size // self.seq_len
                 num_games_batch = minibatch_size // self.seq_len
@@ -372,9 +379,12 @@ class A2CAgent:
                         c_losses.append(c_loss)
                         kls.append(kl)
                         entropies.append(entropy)
+                        
             update_time_end = time.time()
             update_time = update_time_end - update_time_start
             sum_time = update_time + play_time
+            
+            total_time = update_time_end - start_time
 
             if True:
                 print('Frames per seconds: ', batch_size / sum_time)
@@ -393,6 +403,7 @@ class A2CAgent:
                 if len(self.game_rewards) > 0:
                     mean_rewards = np.mean(self.game_rewards)
                     self.writer.add_scalar('rewards/mean_100', mean_rewards, frame)
+                    self.writer.add_scalar('rewards/time', mean_rewards, total_time)
                     if mean_rewards > last_mean_rewards:
                         print('saving next best rewards: ', mean_rewards)
                         last_mean_rewards = mean_rewards
