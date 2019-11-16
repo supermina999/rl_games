@@ -178,3 +178,29 @@ class ModelDDPG(BaseModel):
         action, q_value = self.network(name, inputs_ph, actions_ph, actions_num, reuse)
         return action, q_value
         
+
+class ModelSAC(BaseModel):
+    def __init__(self, network):
+        self.network = network
+
+    def __call__(self, dict, reuse=False):
+        name = dict['name']
+        inputs_ph = dict['inputs']
+        actions_num = dict['actions_num']
+        actions_ph = dict['actions']
+        has_actor = dict['has_actor']
+        mean, log_std, values = self.network(name, inputs_ph, actions_ph, actions_num, has_actor, reuse)
+        if has_actor:
+            log_std = tf.clip_by_value(log_std, -20.0, 2.0)
+            std = tf.exp(log_std)
+            norm_dist = tfd.Normal(mean, std)
+            x_t = tf.squeeze(norm_dist.sample(1), axis=0)
+            y_t = tf.tanh(x_t)
+            action = y_t
+            log_prob = norm_dist.log_prob(x_t)
+            mean = tf.tanh(mean)
+            return action, mean, log_prob, values
+        else:
+            return values
+    
+        

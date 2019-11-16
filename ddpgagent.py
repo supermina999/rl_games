@@ -12,7 +12,8 @@ from tensorboardX import SummaryWriter
 
 default_config = {
     'GAMMA' : 0.99,
-    'LEARNING_RATE' : 1e-3,
+    'ACTOR_LEARNING_RATE' : 1e-3,
+    'CRITIC_LEARNING_RATE' : 1e-3,
     'STEPS_PER_EPOCH' : 20,
     'BATCH_SIZE' : 64,
     'EPSILON' : 0.8,
@@ -46,26 +47,27 @@ def rescale_actions(low, high, action):
 
 
 class OUProcces:
-    def __init__(self, n_actions, ou_mu = 0.0, ou_teta=0.15, ou_sigma=0.2, ou_epsilon=1.0):
+    def __init__(self, n_actions, ou_mu = 0.0, ou_teta=0.15, ou_dt=1, ou_sigma=0.3):
         self.n_actions = n_actions
-        self.ou_mu = ou_mu
-        self.ou_teta = ou_teta
-        self.ou_sigma = ou_sigma
-        self.ou_epsilon = ou_epsilon
-        self.state = np.ones(self.n_actions) * self.ou_mu
+        self.mu = ou_mu
+        self.teta = ou_teta
+        self.sigma = ou_sigma
+        self.dt = ou_dt
+        self.state = np.ones(self.n_actions) * self.mu
 
     def reset(self):
-        self.state = np.ones(self.n_actions) * self.ou_mu
+        self.state = np.ones(self.n_actions) * self.mu
 
-    def get(self):
-        x = self.state
-        dx = self.ou_teta * (self.ou_mu - x) + self.ou_sigma * np.random.randn(len(x))
-        self.state = x + dx
-        return self.state
+    def get(self, delta):
+        sigma = max(0, delta*self.sigma)
+        x = self.state + self.teta * (self.mu - self.state) * self.dt + sigma * np.sqrt(self.dt) * np.random.normal(size=self.n_actions)
+        self.state = x
+        return x
 
 class DDPGAgent:
-    def __init__(self,  env, sess, name, observation_space, action_space, config):
+    def __init__(self,  env, env_eval, sess, name, observation_space, action_space, config):
         observation_shape = env.observation_space.shape
+        self.env_eval = env_eval
         self.env_name = name
         self.actions_low = action_space.low
         self.actions_high = action_space.high
@@ -86,7 +88,8 @@ class DDPGAgent:
         self.atoms_num = self.config['ATOMS_NUM']
         self.is_distributional = self.atoms_num > 1
         self.noise = OUProcces(self.actions_num)
-        self.learning_rate = self.config['LEARNING_RATE']
+        self.actor_learning_rate = self.config['ACTOR_LEARNING_RATE']
+        self.critic_learning_rate = self.config['CRITIC_LEARNING_RATE']
         if self.is_distributional:
             self.v_min = self.config['V_MIN']
             self.v_max = self.config['V_MAX']
@@ -115,7 +118,7 @@ class DDPGAgent:
         else:
             self.setup_c51_qvalues(self.actions_num)
         
-        self.tau = 0.01
+        self.tau = 0.001
         self.saver = tf.train.Saver()
         self.assigns_hard = [tf.assign(w_target, w_self, validate_shape=True) for w_self, w_target in zip(self.weights, self.target_weights)]
         self.assigns_soft = [tf.assign(w_target, w_self * self.tau + w_target * (1. - self.tau), validate_shape=True) for w_self, w_target in zip(self.weights, self.target_weights)]
@@ -125,9 +128,9 @@ class DDPGAgent:
 
     def init_actor(self):
         self.actor_loss = tf.reduce_mean(-self.qvalues_loss)
-        self.actor_train_op = tf.train.AdamOptimizer(self.learning_rate)
+        self.actor_train_op = tf.train.AdamOptimizer(self.actor_learning_rate)
         grads = tf.gradients(self.actor_loss, self.actor_weights)
-        grads, _ = tf.clip_by_global_norm(grads, 0.5)
+        #grads, _ = tf.clip_by_global_norm(grads, 0.5)
         grads = list(zip(grads, self.actor_weights))
         self.actor_train_step = self.actor_train_op.apply_gradients(grads)
 
@@ -137,9 +140,9 @@ class DDPGAgent:
 
         self.td_loss_mean = tf.losses.huber_loss(tf.stop_gradient(self.reference_qvalues), self.qvalues)
 
-        self.critic_train_op = tf.train.AdamOptimizer(self.learning_rate)
+        self.critic_train_op = tf.train.AdamOptimizer(self.critic_learning_rate)
         grads = tf.gradients(self.td_loss_mean, self.critic_weights)
-        grads, _ = tf.clip_by_global_norm(grads, 0.5)
+        #grads, _ = tf.clip_by_global_norm(grads, 0.5)
         grads = list(zip(grads, self.critic_weights))
         self.critic_train_step = self.critic_train_op.apply_gradients(grads)
 
@@ -211,8 +214,29 @@ class DDPGAgent:
         return actions
 
     def get_action_noise(self, state, epsilon):
-        actions = np.clip(self.sess.run(self.actions, {self.obs_ph: [state]})[0] + self.noise.get() * epsilon, -1.0, 1.0)
+        n = self.noise.get(epsilon)
+        actions = np.clip(self.sess.run(self.actions, {self.obs_ph: [state]})[0] + n, -1.0, 1.0)
         return actions
+
+    def evaluate(self, env,t_max=1000, n_games = 10):
+        rewards = 0
+        steps = 0
+        for _ in range(n_games):
+            s = env.reset()
+            reward = 0
+            for _ in range(t_max):
+                #env.render()
+                action = self.get_action(s)
+                #print(action)
+                s, r, done, _ = env.step(rescale_actions(self.actions_low, self.actions_high, action))
+                reward += r
+                steps += 1
+                    
+                if done:
+                    rewards += reward
+                    break       
+            
+        return rewards / n_games, steps / n_games
 
     def play_steps(self, steps, epsilon):
         done_reward = None
@@ -285,6 +309,7 @@ class DDPGAgent:
         BATCH_SIZE = self.config['BATCH_SIZE']
         LIVES_REWARD = self.config['LIVES_REWARD']
         EPISODES_TO_LOG = self.config['EPISODES_TO_LOG']
+        FRAMES_TO_LOG = self.config['FRAMES_TO_LOG']
         frame = 0
         play_time = 0
         update_time = 0
@@ -344,14 +369,9 @@ class DDPGAgent:
                 update_time = 0
                 play_time = 0
             
-            if len(rewards) == EPISODES_TO_LOG:
-                d = EPISODES_TO_LOG / LIVES_REWARD
-                mean_reward = np.sum(rewards) / d
-                mean_shaped_reward = np.sum(shaped_rewards) / d
-                mean_steps = np.sum(steps) / d 
-                rewards = []
-                shaped_rewards = []
-                steps = []
+            if frame % FRAMES_TO_LOG == 0:
+                mean_reward, mean_steps = self.evaluate(self.env_eval, n_games = EPISODES_TO_LOG)
+                print('mean_rewards: ', mean_reward, 'mean_steps: ', mean_steps)
                 if mean_reward > last_mean_rewards:
                     print('saving next best rewards: ', mean_reward)
                     last_mean_rewards = mean_reward
@@ -361,8 +381,6 @@ class DDPGAgent:
                         return
 
                 self.writer.add_scalar('steps', mean_steps, frame)
-                self.writer.add_scalar('reward', mean_reward, frame)
-                self.writer.add_scalar('shaped_reward', mean_shaped_reward, frame)
-                
+                self.writer.add_scalar('reward', mean_reward, frame)                
                 
                 

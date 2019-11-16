@@ -126,10 +126,10 @@ class DQNAgent:
             # we need to return l1 loss to update priority buffer
             self.abs_errors = tf.abs(self.current_action_qvalues - self.reference_qvalues) + 1e-5
             # the same as multiply gradients later (other way is used in different examples over internet) 
-            self.td_loss = tf.losses.huber_loss(self.current_action_qvalues, self.reference_qvalues, reduction=tf.losses.Reduction.NONE) * self.sample_weights_ph
+            self.td_loss = tf.losses.huber_loss( self.reference_qvalues, self.current_action_qvalues, reduction=tf.losses.Reduction.NONE) * self.sample_weights_ph
             self.td_loss_mean = tf.reduce_mean(self.td_loss) 
         else:
-            self.td_loss_mean = tf.losses.huber_loss(self.current_action_qvalues, self.reference_qvalues, reduction=tf.losses.Reduction.MEAN)
+            self.td_loss_mean = tf.losses.huber_loss( self.reference_qvalues, self.current_action_qvalues, reduction=tf.losses.Reduction.MEAN)
 
         self.learning_rate = self.config['LEARNING_RATE']
         self.train_step = tf.train.AdamOptimizer(self.learning_rate).minimize(self.td_loss_mean, var_list=self.weights)
