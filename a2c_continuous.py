@@ -210,7 +210,7 @@ class A2CAgent:
             mb_actions.append(actions)
             mb_values.append(values)
             mb_neglogpacs.append(neglogpacs)
-            mb_dones.append(self.dones)
+            mb_dones.append(self.dones.copy())
             mb_mus.append(mu)
             mb_sigmas.append(sigma)
 
@@ -225,7 +225,7 @@ class A2CAgent:
 
             shaped_rewards = self.rewards_shaper(rewards)
             epinfos.append(infos)
-            shaped_rewards = np.where(self.current_lengths == 1001, 0, shaped_rewards)
+        #    shaped_rewards = np.where(self.current_lengths == 1001, 0, shaped_rewards)
             mb_rewards.append(shaped_rewards)
 
             self.current_rewards = self.current_rewards * (1.0 - self.dones)
