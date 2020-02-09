@@ -41,8 +41,8 @@ class Experiment:
         for key in self.experiments[self.last_exp_idx]['exp']:
             self._set_parameter(self.current_config, key['path'],  key['value'][self.sub_idx])
 
-        with open('data.yml', 'w') as outfile:
-            yaml.dump(self.current_config, outfile, default_flow_style=False)
+        #with open('data.yml', 'w') as outfile:
+        #    yaml.dump(self.current_config, outfile, default_flow_style=False)
 
     def get_next_config(self):
         config = self.current_config
