@@ -59,7 +59,7 @@ params:
     env_name:  PongNoFrameskip-v4
     is_double : True
     score_to_win : 20.9
-    num_steps_fill_buffer : 10000
+    num_steps_fill_buffer : 0
     replay_buffer_type : 'normal'
     replay_buffer_size : 100000
     priority_beta : 0.4
