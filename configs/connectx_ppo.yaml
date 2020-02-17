@@ -11,7 +11,7 @@ params:
   network:
     name: actor_critic
     separate: False
-    normalization: layer_norm
+    #normalization: layer_norm
     space: 
       discrete:
     cnn:
@@ -59,8 +59,8 @@ params:
         scale: 0.01
   config:
     games_to_track : 100
-    reward_scale: 0.1
-    reward_shift: 0
+    reward_shaper:
+        scale_value: 1
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
@@ -68,7 +68,7 @@ params:
     name: connectx_ppo
     score_to_win: 20.9
     grad_norm: 0.5
-    entropy_coef: 0.03
+    entropy_coef: 0.005
     truncate_grads: True
     env_name:  connectx
     ppo: true
