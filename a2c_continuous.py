@@ -170,20 +170,40 @@ class A2CAgent:
         
         self._calc_kl_dist()
 
-        self.loss = self.actor_loss + 0.5 * self.critic_coef * self.critic_loss - self.config['entropy_coef'] * self.entropy
-        self._apply_bound_loss()
-        self.reg_loss = tf.losses.get_regularization_loss()
-        self.loss += self.reg_loss
-        self.train_step = tf.train.AdamOptimizer(self.current_lr * self.lr_multiplier)
-        self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='agent')
+        self.is_separate = True
+        if self.is_separate:
+            self._apply_bound_loss()
+            self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='agent')
+            grads = tf.gradients(self.actor_loss, self.weights)
+            if self.config['truncate_grads']:
+                grads, _ = tf.clip_by_global_norm(grads, self.grad_norm)
+            grads = list(zip(grads, self.weights))
 
-        grads = tf.gradients(self.loss, self.weights)
-        if self.config['truncate_grads']:
-            grads, _ = tf.clip_by_global_norm(grads, self.grad_norm)
-        grads = list(zip(grads, self.weights))
+            self.atrain_step = tf.train.AdamOptimizer(self.current_lr * self.lr_multiplier)
+            self.atrain_op = self.atrain_step.apply_gradients(grads)
+
+            grads = tf.gradients(self.critic_loss, self.weights)
+            if self.config['truncate_grads']:
+                grads, _ = tf.clip_by_global_norm(grads, self.grad_norm)
+            grads = list(zip(grads, self.weights))
+            self.ctrain_step = tf.train.AdamOptimizer(self.current_lr * self.lr_multiplier)
+            self.ctrain_op = self.ctrain_step.apply_gradients(grads)
+            self.train_op = [self.atrain_op, self.ctrain_op]
+        else:
+            self.loss = self.actor_loss + 0.5 * self.critic_coef * self.critic_loss - self.config['entropy_coef'] * self.entropy
+            self._apply_bound_loss()
+            self.reg_loss = tf.losses.get_regularization_loss()
+            self.loss += self.reg_loss
+            self.train_step = tf.train.AdamOptimizer(self.current_lr * self.lr_multiplier)
+            self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='agent')
+
+            grads = tf.gradients(self.loss, self.weights)
+            if self.config['truncate_grads']:
+                grads, _ = tf.clip_by_global_norm(grads, self.grad_norm)
+            grads = list(zip(grads, self.weights))
+            self.train_op = self.train_step.apply_gradients(grads)    
 
 
-        self.train_op = self.train_step.apply_gradients(grads)
         self.saver = tf.train.Saver()
         self.sess.run(tf.global_variables_initializer())
 
