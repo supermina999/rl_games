@@ -1,0 +1,62 @@
+params:  
+  algo:
+    name: a2c_continuous
+
+  model:
+    name: continuous_a2c_logstd
+
+  network:
+    name: actor_critic
+    separate: True
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: normc_initializer
+          std: 0.01
+        sigma_init:
+          name: const_initializer
+          value: 0
+        fixed_sigma: True
+    mlp:
+      units: [128, 64, 32]
+      activation: elu
+      initializer:
+        name: normc_initializer
+        std: 1
+      regularizer:
+        name:  'None'
+
+  load_checkpoint: False
+  load_path: path
+
+  config:
+      reward_shaper:
+        scale_value: 0.1
+      normalize_advantage: True
+      gamma: 0.99
+      tau: 0.9
+
+      learning_rate: 3e-4
+      name: ant05_heavy256_10e
+      score_to_win: 15000
+
+      grad_norm: 0.5
+      entropy_coef: 0.0
+      truncate_grads: True
+      env_name:  FlexAnt
+      ppo: true
+      e_clip: 0.2
+      clip_value: True
+      num_actors: 256
+      steps_num: 32
+      minibatch_size: 8192
+      mini_epochs: 10
+      critic_coef: 1
+      lr_schedule:  adaptive
+      lr_threshold: 0.005
+
+      normalize_input: False
+      seq_len: 8
+      bounds_loss_coef: 0
