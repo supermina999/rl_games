@@ -1,4 +1,3 @@
-
 import networks
 import tr_helpers
 import experience
@@ -108,7 +107,6 @@ class A2CAgent:
             self.lr_multiplier = tf.train.polynomial_decay(1.0, global_step=self.epoch_num, decay_steps=config['max_epochs'], end_learning_rate=0.001, power=tr_helpers.get_or_default(config, 'decay_power', 1.0))
         if self.is_exp_decay_lr:
             self.lr_multiplier = tf.train.exponential_decay(1.0, global_step=self.epoch_num, decay_steps=config['max_epochs'],  decay_rate = config['decay_rate'])
-
 
         self.input_obs = self.obs_ph
         self.input_target_obs = self.target_obs_ph
@@ -412,6 +410,7 @@ class A2CAgent:
                         dict[self.old_sigma_ph] = sigmas[batch]
                         dict[self.learning_rate_ph] = last_lr
                         run_ops = [self.actor_loss, self.critic_loss, self.entropy, self.kl_dist, self.current_lr, self.mu, self.sigma, self.lr_multiplier]
+                        
                         if self.bounds_loss is not None:
                             run_ops.append(self.bounds_loss)
                         

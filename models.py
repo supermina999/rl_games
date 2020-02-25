@@ -2,6 +2,7 @@ import tensorflow as tf
 import networks
 import numpy as np
 import tensorflow_probability as tfp
+
 tfd = tfp.distributions
 
 def entry_stop_gradients(target, mask):
@@ -11,7 +12,6 @@ def entry_stop_gradients(target, mask):
 class BaseModel(object):
     def is_rnn(self):
         return False
-
 
 class ModelA2C(BaseModel):
     def __init__(self, network):
@@ -33,8 +33,6 @@ class ModelA2C(BaseModel):
         probs = tf.nn.softmax(logits)
 
         # Gumbel Softmax
-        
-
         if not is_train:
             u = tf.random_uniform(tf.shape(logits), dtype=logits.dtype)
             rand_logits = logits - tf.log(-tf.log(u))
@@ -52,9 +50,6 @@ class ModelA2C(BaseModel):
         else:
             prev_neglogp = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=prev_actions_ph)
             return prev_neglogp, value, None, entropy
-
-
-
 
 class ModelA2CContinuous(BaseModel):
     def __init__(self, network):
@@ -79,8 +74,6 @@ class ModelA2CContinuous(BaseModel):
         prev_neglogp = tf.reduce_sum(-tf.log(norm_dist.prob(prev_actions_ph) + 1e-6), axis=-1)
         return prev_neglogp, value, action, entropy, mu, sigma
 
-
-
 class ModelA2CContinuousLogStd(BaseModel):
     def __init__(self, network):
         self.network = network
@@ -95,7 +88,6 @@ class ModelA2CContinuousLogStd(BaseModel):
 
         mean, logstd, value = self.network(name, inputs=inputs, actions_num=actions_num, continuous=True, is_train=True, reuse=reuse)
     
-
         std = tf.exp(logstd)
         norm_dist = tfd.Normal(mean, std)
 
@@ -154,7 +146,6 @@ class LSTMModelA2CContinuousLogStd(BaseModel):
         prev_neglogp = tf.reduce_sum(-tf.log(norm_dist.prob(prev_actions_ph) + 1e-6), axis=-1)
         return prev_neglogp, value, action, entropy, mu, std, states_ph, masks_ph, lstm_state, initial_state
 
-
 class LSTMModelA2CContinuous(BaseModel):
     def __init__(self, network):
         self.network = network
@@ -189,8 +180,6 @@ class LSTMModelA2CContinuous(BaseModel):
 
         prev_neglogp = tf.reduce_sum(-tf.log(norm_dist.prob(prev_actions_ph) + 1e-6), axis=-1)
         return prev_neglogp, value, action, entropy, mu, sigma, states_ph, masks_ph, lstm_state, initial_state
-
-
 
 class LSTMModelA2C(BaseModel):
     def __init__(self, network):
@@ -230,7 +219,6 @@ class LSTMModelA2C(BaseModel):
 
         prev_neglogp = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=prev_actions_ph)
         return prev_neglogp, value, None, entropy, states_ph, masks_ph, lstm_state, initial_state
-
 
 class AtariDQN(BaseModel):
     def __init__(self, network):

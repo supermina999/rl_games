@@ -42,6 +42,7 @@ class HCRewardEnv(gym.RewardWrapper):
             self.stops_decay = 0
         '''
         return np.max([-10, reward])
+
 class HCObsEnv(gym.ObservationWrapper):
     def __init__(self, env):
         gym.RewardWrapper.__init__(self, env)
@@ -91,7 +92,6 @@ def create_super_mario_env_stage1(name='SuperMarioBrosRandomStage1-v1'):
     
     return env
 
-
 def create_quadrupped_env():
     import gym
     import roboschool
@@ -102,7 +102,6 @@ def create_roboschool_env(name):
     import gym
     import roboschool
     return gym.make(name)
-
 
 def create_multiflex(path, num_instances=1):
     from flex_gym.flex_vec_env import set_flex_bin_path, make_flex_vec_env_muli_env

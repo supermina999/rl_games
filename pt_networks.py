@@ -168,8 +168,6 @@ def default_a2c_lstm_network_separated(name, inputs, actions_num, games_num, bat
             logits = tf.layers.dense(inputs=lstm_outa, units=actions_num, activation=None)
             return logits, value, states_ph, dones_ph, lstm_state, initial_state
 
-
-
 def simple_a2c_lstm_network_separated(name, inputs, actions_num, games_num, batch_num, continuous=False, reuse=False):
     env_num = games_num
 

@@ -168,7 +168,6 @@ carracing_config = {
     'lr_schedule' : 'None'
 }
 
-
 quadrupped_config = {
     'network' : models.ModelA2CContinuous(networks.simple_a2c_network),
     'reward_shaper' : tr_helpers.DefaultRewardsShaper(scale_value = 1.0 / 100.0),
@@ -329,7 +328,6 @@ pendulum_lstm_config = {
     'lr_threshold' : 0.75,
     'normalize_input' : False
 }
-
 
 bipedalwalkerhardcore_config = {
     'network' : models.ModelA2CContinuous(networks.simple_a2c_network_separated),

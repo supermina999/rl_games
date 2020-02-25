@@ -561,7 +561,6 @@ def simple_a2c_network(name, inputs, actions_num, continuous=False, reuse=False)
             logits = tf.layers.dense(inputs=hidden2, units=actions_num, activation=None)
             return logits, value
 
-
 def atari_a2c_network_separated(name, inputs, actions_num, continuous=False, reuse=False):
     with tf.variable_scope(name, reuse=reuse):
         NUM_HIDDEN_NODES = 512

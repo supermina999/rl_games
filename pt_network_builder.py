@@ -54,22 +54,30 @@ class NetworkBuilder:
     def _noisy_dense(self, inputs, units, activation, kernel_initializer, kernel_regularizer, name):
         return networks.noisy_dense(inputs, units, name, True, activation)
 
+    def mlp(sizes, activation, output_activation=nn.Identity):
+        layers = []
+        for j in range(len(sizes)-1):
+            act = activation if j < len(sizes)-2 else output_activation
+            layers += [nn.Linear(sizes[j], sizes[j+1]), act()]
+        return nn.Sequential(*layers)    
+    
     def _build_mlp(self, 
-    name, 
-    input, 
-    units, 
-    activation, 
-    initializer, 
-    regularizer, 
-    norm_func_name = None, 
-    dense_func = tf.layers.dense,
-    is_train=True):
-        out = input
+        name, 
+        input, 
+        units, 
+        activation, 
+        initializer, 
+        regularizer, 
+        norm_func_name = None): 
+    #    dense_func = tf.layers.dense):
+    #    out = input
         ind = 0
-        for unit in units:
+        layers = []
+
+    '''for unit in units:
             ind += 1
             out = dense_func(out, units=unit, 
-            activation=self.activations_factory.create(activation), 
+            activation = self.activations_factory.create(activation), 
             kernel_initializer = self.init_factory.create(**initializer), 
             kernel_regularizer = self.regularizer_factory.create(**regularizer),
             #bias_initializer=tf.random_uniform_initializer(-0.1, 0.1),
@@ -77,7 +85,12 @@ class NetworkBuilder:
             if norm_func_name == 'layer_norm':
                 out = tf.contrib.layers.layer_norm(out)
             elif norm_func_name == 'batch_norm':
-                out = tf.layers.batch_normalization(out, training=is_train)   
+                out = tf.layers.batch_normalization(out, training=is_train)'''
+
+        for i in range(len(sizes)-1):
+            activation = self.activations_factory.create(activation)
+            layers += [nn.Linear(sizes[i], sizes[i+1]), activation()]
+        return nn.Sequential(*layers)  
 
         return out
 
