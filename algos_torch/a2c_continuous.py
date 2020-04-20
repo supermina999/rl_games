@@ -5,9 +5,18 @@ from torch import nn
 import algos_torch.torch_ext
 import numpy as np
 
+def swap_and_flatten01(arr):
+    """
+    swap and then flatten axes 0 and 1
+    """
+    if arr is None:
+        return arr
+    s = arr.size()
+    return arr.transpose(0, 1).reshape(s[0] * s[1], *s[2:])
+
 class A2CAgent(common.a2c_common.ContinuousA2CBase):
     def __init__(self, base_name, observation_space, action_space, config):
-        common.a2c_common.ContinuousA2CBase.__init__(self, base_name, observation_space, action_space, config)
+        common.a2c_common.ContinuousA2CBase.__init__(self, base_name, observation_space, action_space, config, False)
         
         config = {
             'actions_num' : self.actions_num,
@@ -20,29 +29,117 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
         self.last_lr = float(self.last_lr)
         self.optimizer = optim.Adam(self.model.parameters(), float(self.last_lr))
         #self.optimizer = algos_torch.torch_ext.RangerQH(self.model.parameters(), float(self.last_lr))
+        batch_size = self.num_agents * self.num_actors
+        if observation_space.dtype == np.uint8:
+            torch_dtype = torch.uint8
+        else:
+            torch_dtype = torch.float32
 
-        '''
-        self.mb_obs = ((self.steps_num, batch_size) + self.state_shape, dtype = observation_space.dtype)
-        self.mb_rewards = np.zeros((self.steps_num, batch_size), dtype = np.float32)
-        self.mb_actions = np.zeros((self.steps_num, batch_size, self.actions_num), dtype = np.float32)
-        self.mb_values = np.zeros((self.steps_num, batch_size), dtype = np.float32)
-        self.mb_dones = np.zeros((self.steps_num, batch_size), dtype  = np.bool)
-        self.mb_neglogpacs = np.zeros((self.steps_num, batch_size), dtype = np.float32)
-        self.mb_mus = np.zeros((self.steps_num, batch_size, self.actions_num), dtype = np.float32)
-        self.mb_sigmas = np.zeros((self.steps_num, batch_size, self.actions_num), dtype = np.float32)
-        '''
+        self.mb_obs = torch.zeros((self.steps_num, batch_size) + self.state_shape, dtype=torch_dtype).cuda()
+        self.mb_rewards = torch.zeros((self.steps_num, batch_size), dtype = torch.float32).cuda()
+        self.mb_actions = torch.zeros((self.steps_num, batch_size, self.actions_num), dtype = torch.float32).cuda()
+        self.mb_values = torch.zeros((self.steps_num, batch_size), dtype = torch.float32).cuda()
+        self.mb_dones = torch.zeros((self.steps_num, batch_size), dtype = torch.long).cuda()
+        self.mb_neglogpacs = torch.zeros((self.steps_num, batch_size), dtype = torch.float32).cuda()
+        self.mb_mus = torch.zeros((self.steps_num, batch_size, self.actions_num), dtype = torch.float32).cuda()
+        self.mb_sigmas = torch.zeros((self.steps_num, batch_size, self.actions_num), dtype = torch.float32).cuda()
 
+    def play_steps(self):
+        # Here, we init the lists that will contain the mb of experiences
+        #mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs, mb_mus, mb_sigmas = [],[],[],[],[],[],[],[]
+        mb_states = []
+        epinfos = []
+        #'''
+        mb_obs = self.mb_obs
+        mb_rewards = self.mb_rewards
+        mb_actions = self.mb_actions
+        mb_values = self.mb_values
+        mb_neglogpacs = self.mb_neglogpacs
+        mb_mus = self.mb_mus
+        mb_sigmas = self.mb_sigmas
+        mb_dones = self.mb_dones
+        #'''
+        #mb_states = self.mb_states
+        # For n in range number of steps
+        for n in range(self.steps_num):
+            if self.network.is_rnn():
+                mb_states.append(self.states)
+
+            self.obs = self._preproc_obs(self.obs)
+            actions, values, neglogpacs, mu, sigma, self.states = self.get_action_values(self.obs)
+            values = np.squeeze(values)
+            neglogpacs = np.squeeze(neglogpacs)
+     
+            
+            mb_obs[n,:] = self.obs
+            mb_dones[n,:] = torch.cuda.LongTensor(self.dones)
+
+            self.obs, rewards, self.dones, infos = self.vec_env.step(common.a2c_common.rescale_actions(self.actions_low, self.actions_high, np.clip(actions.cpu().numpy(), -1.0, 1.0)))
+            self.current_rewards += rewards
+            self.current_lengths += 1
+            for reward, length, done in zip(self.current_rewards, self.current_lengths, self.dones):
+                if done:
+                    self.game_rewards.append(reward)
+                    self.game_lengths.append(length)
+
+            shaped_rewards = self.rewards_shaper(rewards)
+            epinfos.append(infos)
+
+            mb_actions[n,:] = actions
+            mb_values[n,:] = values
+            mb_neglogpacs[n,:] = neglogpacs
+            
+            mb_mus[n,:] = mu
+            mb_sigmas[n,:] = sigma
+            mb_rewards[n,:] = torch.cuda.FloatTensor(shaped_rewards)
+            
+            self.current_rewards = self.current_rewards * (1.0 - self.dones)
+            self.current_lengths = self.current_lengths * (1.0 - self.dones)
+        self.obs = self._preproc_obs(self.obs)
+        last_values = self.get_values(self.obs)
+        last_values = last_values.squeeze()
+
+        mb_returns = torch.zeros_like(mb_rewards)
+        mb_advs = torch.zeros_like(mb_rewards)
+        lastgaelam = 0
+        
+        for t in reversed(range(self.steps_num)):
+            if t == self.steps_num - 1:
+                nextnonterminal = torch.cuda.FloatTensor(1.0 - self.dones)
+                nextvalues = last_values
+            else:
+                nextnonterminal = 1.0 - mb_dones[t+1]
+                nextvalues = mb_values[t+1]
+            
+            delta = mb_rewards[t] + self.gamma * nextvalues * nextnonterminal  - mb_values[t]
+            mb_advs[t] = lastgaelam = delta + self.gamma * self.tau * nextnonterminal * lastgaelam
+
+        mb_returns = mb_advs + mb_values
+
+        if self.network.is_rnn():
+            result = (*map(swap_and_flatten01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_mus, mb_sigmas, mb_states )), epinfos)
+        else:
+            result = (*map(swap_and_flatten01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, mb_mus, mb_sigmas)), None, epinfos)
+
+        return result
 
     def update_epoch(self):
         self.epoch_num += 1
         return self.epoch_num
 
-    def _preproc_obs(self, obs_batch):
-        if obs_batch.dtype == np.uint8:
-            obs_batch = torch.cuda.ByteTensor(obs_batch)
-            obs_batch = obs_batch.float() / 255.0
+    def _tensor_from_obs(self, obs):
+        if type(obs) is not np.ndarray:
+            return obs
+        if obs.dtype == np.uint8:
+            obs = torch.cuda.ByteTensor(obs)
         else:
-            obs_batch = torch.cuda.FloatTensor(obs_batch)
+            obs = torch.cuda.FloatTensor(obs)    
+        return obs    
+
+    def _preproc_obs(self, obs_batch):
+        obs_batch = self._tensor_from_obs(obs_batch)
+        if obs_batch.dtype == np.uint8:
+            obs_batch = obs_batch.float() / 255.0
 
         if len(obs_batch.size()) == 4:
             obs_batch = obs_batch.permute((0, 3, 1, 2))
@@ -59,7 +156,7 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
 
 
     def get_action_values(self, obs):
-        obs = self._preproc_obs(obs)
+        #obs = self._preproc_obs(obs)
         self.model.eval()
         input_dict = {
             'is_train': False,
@@ -68,15 +165,15 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
         }
         with torch.no_grad():
             neglogp, value, action, mu, sigma = self.model(input_dict)
-        return action.detach().cpu().numpy(), \
-                value.detach().cpu().numpy(), \
-                neglogp.detach().cpu().numpy(), \
-                mu.detach().cpu().numpy(), \
-                sigma.detach().cpu().numpy(), \
+        return action.detach(), \
+                value.detach(), \
+                neglogp.detach(), \
+                mu.detach(), \
+                sigma.detach(), \
                 None
 
     def get_values(self, obs):
-        obs = self._preproc_obs(obs)
+        #obs = self._preproc_obs(obs)
         self.model.eval()
         input_dict = {
             'is_train': False,
@@ -85,7 +182,7 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
         }
         with torch.no_grad():
             neglogp, value, action, mu, sigma = self.model(input_dict)
-        return value.detach().cpu().numpy()
+        return value.detach()
 
     def get_weights(self):
         return torch.nn.utils.parameters_to_vector(self.model.parameters())
@@ -95,15 +192,15 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
 
     def train_actor_critic(self, input_dict):
         self.model.train()
-        value_preds_batch = torch.cuda.FloatTensor(input_dict['old_values'])
-        old_action_log_probs_batch = torch.cuda.FloatTensor(input_dict['old_logp_actions'])
-        advantage = torch.cuda.FloatTensor(input_dict['advantages'])
-        old_mu_batch = torch.cuda.FloatTensor(input_dict['mu'])
-        old_sigma_batch = torch.cuda.FloatTensor(input_dict['sigma'])
-        return_batch = torch.cuda.FloatTensor(input_dict['returns'])
-        actions_batch = torch.cuda.FloatTensor(input_dict['actions'])
+        value_preds_batch = input_dict['old_values']
+        old_action_log_probs_batch = input_dict['old_logp_actions']
+        advantage = input_dict['advantages']
+        old_mu_batch = input_dict['mu']
+        old_sigma_batch = input_dict['sigma']
+        return_batch = input_dict['returns']
+        actions_batch = input_dict['actions']
         obs_batch = input_dict['obs']
-        obs_batch = self._preproc_obs(obs_batch)
+        #obs_batch = self._preproc_obs(obs_batch)
         lr = self.last_lr
         kl = 1.0
         lr_mul = 1.0
@@ -163,4 +260,4 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
 
         return a_loss.item(), c_loss.item(), entropy.item(), \
             kl_dist, self.last_lr, lr_mul, \
-            mu.detach().cpu().numpy(), sigma.detach().cpu().numpy(), b_loss.item()
+            mu.detach(), sigma.detach(), b_loss.item()

@@ -25,6 +25,20 @@ class DefaultRewardsShaper:
         reward = np.clip(reward, self.min_val, self.max_val)
         return reward
 
+class TorchRewardsShaper:
+    def __init__(self, scale_value = 1, shift_value = 0, min_val=-np.inf, max_val=np.inf):
+        self.scale_value = scale_value
+        self.shift_value = shift_value
+        self.min_val = min_val
+        self.max_val = max_val
+    def __call__(self, reward):
+        import torch
+        reward = reward + self.shift_value
+        reward = reward * self.scale_value
+
+        reward = torch.clamp(reward, self.min_val, self.max_val)
+        return reward
+
 def discount_with_dones(rewards, dones, gamma):
     discounted = []
     r = 0

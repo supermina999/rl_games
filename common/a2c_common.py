@@ -26,6 +26,7 @@ def rescale_actions(low, high, action):
 class A2CBase:
     def __init__(self, base_name, observation_space, action_space, config):
         observation_shape = observation_space.shape
+        self.obs_space = observation_space
         self.use_action_masks = config.get('use_action_masks', False)
         self.is_train = config.get('is_train', True)
         self.self_play = config.get('self_play', False)
@@ -87,6 +88,7 @@ class A2CBase:
 
     def update_epoch(self):
         pass
+
     def save(self, fn):
         pass
 
@@ -352,6 +354,7 @@ class ContinuousA2CBase(A2CBase):
         self.actions_low = action_space.low
         self.actions_high = action_space.high
         self.actions_num = action_space.shape[0]
+        self.init_arrays = init_arrays
         batch_size = self.num_agents * self.num_actors
         if init_arrays:
             self.mb_obs = np.zeros((self.steps_num, batch_size) + self.state_shape, dtype = observation_space.dtype)
@@ -543,7 +546,9 @@ class ContinuousA2CBase(A2CBase):
         total_time = 0
         rep_count = 0
         frame = 0
+
         self.obs = self.vec_env.reset()
+
         while True:
             epoch_num = self.update_epoch()
             frame += self.batch_size_envs
