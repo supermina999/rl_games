@@ -65,9 +65,6 @@ def variance_scaling_initializer(tensor, mode='fan_in',scale = 2.0):
         return sample_truncated_normal(tensor.size(), sigma=sigma)
 
 
-
-
-
 class RangerQH(Optimizer):
     r"""Implements the QHAdam optimization algorithm `(Ma and Yarats, 2019)`_.
     Along with Hinton/Zhang Lookahead.
@@ -162,9 +159,7 @@ class RangerQH(Optimizer):
 
                 d_p = p.grad.data
                 if d_p.is_sparse:
-                    raise RuntimeError("QHAdam does not support sparse gradients")
-
-                
+                    raise RuntimeError("QHAdam does not support sparse gradients")         
 
                 if weight_decay != 0:
                     if decouple_weight_decay:
@@ -186,8 +181,7 @@ class RangerQH(Optimizer):
                     #look ahead weight storage now in state dict 
                     param_state['slow_buffer'] = torch.empty_like(p.data)
                     param_state['slow_buffer'].copy_(p.data)
-                
-                
+                       
                 param_state['step'] += 1                
 
                 param_state["beta1_weight"] = 1.0 + beta1 * param_state["beta1_weight"]
@@ -223,7 +217,6 @@ class RangerQH(Optimizer):
                     slow_p.add_(self.alpha, p.data - slow_p)  #(fast weights - slow weights) * alpha
                     p.data.copy_(slow_p)  #copy interpolated weights to RAdam param tensor
                 
-
         return loss
 
     @classmethod

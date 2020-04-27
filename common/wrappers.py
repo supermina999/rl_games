@@ -8,8 +8,6 @@ import cv2
 cv2.ocl.setUseOpenCL(False)
 
 
-
-
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max=30):
         """Sample initial states by taking random number of no-ops on reset.
@@ -188,7 +186,6 @@ class FrameStack(gym.Wrapper):
             else:
                 self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * k,)), dtype=env.observation_space.dtype)
 
-
     def reset(self):
         ob = self.env.reset()
         for _ in range(self.k):
@@ -347,8 +344,6 @@ class AllowBacktracking(gym.Wrapper):
         rew = max(0, self._cur_x - self._max_x)
         self._max_x = max(self._max_x, self._cur_x)
         return obs, rew, done, info
-
-
 
 def make_atari(env_id, timelimit=True, noop_max=30, skip=4, directory=None):
     # XXX(john): remove timelimit argument after gym is upgraded to allow double wrapping
