@@ -7,8 +7,8 @@ import numpy as np
 from algos_torch.running_mean_std import RunningMeanStd
 
 class A2CAgent(common.a2c_common.ContinuousA2CBase):
-    def __init__(self, base_name, observation_space, action_space, config):
-        common.a2c_common.ContinuousA2CBase.__init__(self, base_name, observation_space, action_space, config)
+    def __init__(self, base_name, observation_space, action_space, config, vec_env=None):
+        common.a2c_common.ContinuousA2CBase.__init__(self, base_name, observation_space, action_space, config, vec_env)
         
         config = {
             'actions_num' : self.actions_num,
@@ -19,8 +19,8 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
         self.model = self.network.build(config)
         self.model.cuda()
         self.last_lr = float(self.last_lr)
-        #self.optimizer = optim.Adam(self.model.parameters(), float(self.last_lr))
-        self.optimizer = algos_torch.torch_ext.RangerQH(self.model.parameters(), float(self.last_lr))
+        self.optimizer = optim.Adam(self.model.parameters(), float(self.last_lr))
+        #self.optimizer = algos_torch.torch_ext.RangerQH(self.model.parameters(), float(self.last_lr))
 
         if self.normalize_input:
             self.running_mean_std = RunningMeanStd(observation_space.shape).cuda()
@@ -55,7 +55,6 @@ class A2CAgent(common.a2c_common.ContinuousA2CBase):
         self.model.eval()
         if self.normalize_input:
             self.running_mean_std.eval()
-
 
     def set_train(self):
         self.model.train()

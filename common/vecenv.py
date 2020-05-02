@@ -1,6 +1,7 @@
 import ray
 from common.env_configurations import configurations
 import numpy as np
+import torch
 
 class IVecEnv(object):
     def step(self, actions):
@@ -31,6 +32,21 @@ class IsaacEnv(IVecEnv):
         return self.obs
 
 
+class IsaacGPUEnv(IVecEnv):
+    def __init__(self, env, num_actors, config = None):
+        self.env = env
+        self.obs = self.env.reset()
+    
+    def step(self, action): 
+        next_state, reward, is_done, info = self.env.step(torch.from_numpy(action))
+        self.obs = next_state.detach().numpy()
+        return self.obs, reward.detach().numpy(), is_done.detach().numpy(), info.detach().numpy()
+
+    def reset(self):
+        self.obs = self.env.reset().detach().numpy()
+        return self.obs
+
+
 class RayWorker:
     def __init__(self, config_name, config):
         self.env = configurations[config_name]['env_creator'](**config)
@@ -52,7 +68,6 @@ class RayWorker:
 
     def get_action_mask(self):
         return self.env.get_action_mask()
-
 
     def get_number_of_agents(self):
         return self.env.get_number_of_agents()
@@ -131,10 +146,15 @@ class RayVecSMACEnv(IVecEnv):
         return np.concatenate(newobs, axis=0)
 
 
-def create_vec_env(config_name, num_actors, **kwargs):
+'''def create_vec_env(config_name, num_actors, **kwargs):
     if configurations[config_name]['vecenv_type'] == 'RAY':
         return RayVecEnv(config_name, num_actors, **kwargs)
     if configurations[config_name]['vecenv_type'] == 'RAY_SMAC':
         return RayVecSMACEnv(config_name, num_actors, **kwargs)
     if configurations[config_name]['vecenv_type'] == 'ISAAC':
         return IsaacEnv(config_name, num_actors, **kwargs)
+    if configurations[config_name]['vecenv_type'] == 'ISAAC_GPU':
+        return IsaacGPUEnv(config_name, num_actors, **kwargs)'''
+
+def create_vec_env(config_name, num_actors, env, **kwargs):
+    return env

@@ -10,7 +10,7 @@ print(find_packages())
 setup(name='rl_games',
       packages=[package for package in find_packages()
                 if package.startswith('rl_games')],
-      version='0.08',
+      version='0.9',
       install_requires=[],
       )
 

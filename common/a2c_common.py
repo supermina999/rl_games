@@ -24,7 +24,7 @@ def rescale_actions(low, high, action):
     return scaled_action
 
 class A2CBase:
-    def __init__(self, base_name, observation_space, action_space, config):
+    def __init__(self, base_name, observation_space, action_space, config, vec_env=None):
         observation_shape = observation_space.shape
         self.use_action_masks = config.get('use_action_masks', False)
         self.is_train = config.get('is_train', True)
@@ -44,7 +44,10 @@ class A2CBase:
         self.rewards_shaper = config['reward_shaper']
         self.num_actors = config['num_actors']
         self.env_config = self.config.get('env_config', {})
-        self.vec_env = vecenv.create_vec_env(self.env_name, self.num_actors, **self.env_config)
+
+        self.vec_env = vec_env
+    #    if vec_env is None:
+    #    self.vec_env = vecenv.create_vec_env(self.env_name, self.num_actors, vec_env, **self.env_config)
         self.num_agents = self.vec_env.get_number_of_agents()
         self.steps_num = config['steps_num']
         self.seq_len = self.config['seq_len']
@@ -144,7 +147,6 @@ class DiscreteA2CBase(A2CBase):
             else:
                 actions, values, neglogpacs, self.states = self.get_action_values(self.obs)
   
-
             actions = np.squeeze(actions)
             values = np.squeeze(values)
             neglogpacs = np.squeeze(neglogpacs)
@@ -285,7 +287,6 @@ class DiscreteA2CBase(A2CBase):
 
         return play_time, update_time, total_time, a_losses, c_losses, entropies, kls, last_lr, lr_mul
 
-
     def train(self):
         last_mean_rewards = -100500
         start_time = time.time()
@@ -346,13 +347,14 @@ class DiscreteA2CBase(A2CBase):
 
 
 class ContinuousA2CBase(A2CBase):
-    def __init__(self, base_name, observation_space, action_space, config, init_arrays=True):
-        A2CBase.__init__(self, base_name, observation_space, action_space, config)
+    def __init__(self, base_name, observation_space, action_space, config, vec_env=None, init_arrays=True):
+        A2CBase.__init__(self, base_name, observation_space, action_space, config, vec_env)
         self.bounds_loss_coef = config.get('bounds_loss_coef', None)
         self.actions_low = action_space.low
         self.actions_high = action_space.high
         self.actions_num = action_space.shape[0]
         batch_size = self.num_agents * self.num_actors
+
         if init_arrays:
             self.mb_obs = np.zeros((self.steps_num, batch_size) + self.state_shape, dtype = observation_space.dtype)
             self.mb_rewards = np.zeros((self.steps_num, batch_size), dtype = np.float32)
@@ -385,12 +387,10 @@ class ContinuousA2CBase(A2CBase):
                 mb_states.append(self.states)
             actions, values, neglogpacs, mu, sigma, self.states = self.get_action_values(self.obs)
             values = np.squeeze(values)
-            neglogpacs = np.squeeze(neglogpacs)
-     
+            neglogpacs = np.squeeze(neglogpacs)  
             
             mb_obs[n,:] = self.obs
             mb_dones[n,:] = self.dones
-
 
             self.obs[:], rewards, self.dones, infos = self.vec_env.step(rescale_actions(self.actions_low, self.actions_high, np.clip(actions, -1.0, 1.0)))
             self.current_rewards += rewards
@@ -536,13 +536,13 @@ class ContinuousA2CBase(A2CBase):
 
         return play_time, update_time, total_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul
 
-
     def train(self):
         last_mean_rewards = -100500
         start_time = time.time()
         total_time = 0
         rep_count = 0
         frame = 0
+
         self.obs = self.vec_env.reset()
         while True:
             epoch_num = self.update_epoch()
@@ -552,7 +552,7 @@ class ContinuousA2CBase(A2CBase):
             total_time += sum_time
             if True:
                 scaled_time = self.num_agents * sum_time
-                print('frames per seconds: ', self.batch_size / scaled_time)
+            #    print('frames per seconds: ', self.batch_size / scaled_time)
                 self.writer.add_scalar('performance/fps', self.batch_size / scaled_time, frame)
                 self.writer.add_scalar('performance/upd_time', update_time, frame)
                 self.writer.add_scalar('performance/play_time', play_time, frame)
@@ -571,18 +571,20 @@ class ContinuousA2CBase(A2CBase):
                     mean_rewards = np.mean(self.game_rewards)
                     mean_lengths = np.mean(self.game_lengths)
                     #mean_scores = np.mean(self.game_scores)
-                    self.writer.add_scalar('rewards/mean', mean_rewards, frame)
+                    self.writer.add_scalar('rewards/frame', mean_rewards, frame)
+                    self.writer.add_scalar('rewards/iter', mean_rewards, epoch_num)
                     self.writer.add_scalar('rewards/time', mean_rewards, total_time)
-                    self.writer.add_scalar('episode_lengths/mean', mean_lengths, frame)
+                    self.writer.add_scalar('episode_lengths/frame', mean_lengths, frame)
+                    self.writer.add_scalar('episode_lengths/iter', mean_lengths, epoch_num)
                     self.writer.add_scalar('episode_lengths/time', mean_lengths, total_time)
                     #self.writer.add_scalar('win_rate/mean', mean_scores, frame)
                     #self.writer.add_scalar('win_rate/time', mean_scores, total_time)
-                    if rep_count % 10 == 0:
+                    if rep_count % 50 == 0:
                         self.save("./nn/" + 'last_' + self.config['name'] + 'ep=' + str(epoch_num) + 'rew=' + str(mean_rewards))
                         rep_count += 1
 
-                    if mean_rewards > last_mean_rewards:
-                        print('saving next best rewards: ', mean_rewards)
+                    if mean_rewards > last_mean_rewards and epoch_num > 50:
+                        print('Saving next best rewards, time: ', mean_rewards, total_time)
                         last_mean_rewards = mean_rewards
                         self.save("./nn/" + self.config['name'] + self.env_name)
                         if last_mean_rewards > self.config['score_to_win']:
