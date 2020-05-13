@@ -25,7 +25,7 @@ def rescale_actions(low, high, action):
 
 class A2CBase:
     def __init__(self, base_name, observation_space, action_space, config, vec_env=None):
-        observation_shape = observation_space.shape
+        self.obs_space = observation_space
         self.use_action_masks = config.get('use_action_masks', False)
         self.is_train = config.get('is_train', True)
         self.self_play = config.get('self_play', False)
@@ -48,13 +48,13 @@ class A2CBase:
         self.vec_env = vec_env
     #    if vec_env is None:
     #    self.vec_env = vecenv.create_vec_env(self.env_name, self.num_actors, vec_env, **self.env_config)
-        self.num_agents = self.vec_env.get_number_of_agents()
+        self.num_agents = 1  #self.vec_env.get_number_of_agents()
         self.steps_num = config['steps_num']
         self.seq_len = self.config['seq_len']
         self.normalize_advantage = config['normalize_advantage']
         self.normalize_input = self.config['normalize_input']
        
-        self.state_shape = observation_shape
+        self.state_shape = observation_space.shape
         self.critic_coef = config['critic_coef']
         self.grad_norm = config['grad_norm']
         self.gamma = self.config['gamma']
@@ -353,8 +353,9 @@ class ContinuousA2CBase(A2CBase):
         self.actions_low = action_space.low
         self.actions_high = action_space.high
         self.actions_num = action_space.shape[0]
-        batch_size = self.num_agents * self.num_actors
+        self.init_arrays = init_arrays
 
+        batch_size = self.num_agents * self.num_actors
         if init_arrays:
             self.mb_obs = np.zeros((self.steps_num, batch_size) + self.state_shape, dtype = observation_space.dtype)
             self.mb_rewards = np.zeros((self.steps_num, batch_size), dtype = np.float32)
@@ -392,7 +393,7 @@ class ContinuousA2CBase(A2CBase):
             mb_obs[n,:] = self.obs
             mb_dones[n,:] = self.dones
 
-            self.obs[:], rewards, self.dones, infos = self.vec_env.step(rescale_actions(self.actions_low, self.actions_high, np.clip(actions, -1.0, 1.0)))
+            self.obs[:], rewards, self.dones, infos = self.vec_env.step(torch.clamp(actions, -1.0, 1.0))
             self.current_rewards += rewards
             self.current_lengths += 1
             for reward, length, done in zip(self.current_rewards, self.current_lengths, self.dones):
