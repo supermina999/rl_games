@@ -60,10 +60,22 @@ class A2CBase:
         self.dones = np.asarray([False]*self.num_actors *self.num_agents, dtype=np.bool)
         self.current_rewards = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
         self.current_lengths = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_x_speed = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_height = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_energy = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_x_speed_reward = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_height_reward = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
+        self.current_energy_reward = np.asarray([0]*self.num_actors *self.num_agents, dtype=np.float32)
         self.games_to_log = self.config.get('games_to_track', 100)
         self.game_rewards = deque([], maxlen=self.games_to_log)
         self.game_lengths = deque([], maxlen=self.games_to_log)
-        self.game_scores = deque([], maxlen=self.games_to_log)   
+        self.game_scores = deque([], maxlen=self.games_to_log)
+        self.game_x_speed = deque([], maxlen=self.games_to_log)
+        self.game_height = deque([], maxlen=self.games_to_log)
+        self.game_energy = deque([], maxlen=self.games_to_log)
+        self.game_x_speed_reward = deque([], maxlen=self.games_to_log)
+        self.game_height_reward = deque([], maxlen=self.games_to_log)
+        self.game_energy_reward = deque([], maxlen=self.games_to_log)
         self.obs = None
         self.games_num = self.config['minibatch_size'] // self.seq_len # it is used only for current rnn implementation
         self.is_rnn = False
@@ -373,6 +385,13 @@ class DiscreteA2CBase(A2CBase):
                 self.writer.add_scalar('info/e_clip', self.e_clip * lr_mul, frame)
                 self.writer.add_scalar('info/kl', np.mean(kls), frame)
                 self.writer.add_scalar('epochs', epoch_num, frame)
+
+                self.writer.add_scalar('info/x_speed', np.mean(self.game_x_speed), frame)
+                self.writer.add_scalar('info/height', np.mean(self.game_height), frame)
+                self.writer.add_scalar('info/energy', np.mean(self.game_energy), frame)
+                self.writer.add_scalar('rewards/x_speed', np.mean(self.game_x_speed_reward), frame)
+                self.writer.add_scalar('rewards/height', np.mean(self.game_height_reward), frame)
+                self.writer.add_scalar('rewards/energy', np.mean(self.game_energy_reward), frame)
                 
                 if len(self.game_rewards) > 0:
                     mean_rewards = np.mean(self.game_rewards)
@@ -384,6 +403,13 @@ class DiscreteA2CBase(A2CBase):
                     self.writer.add_scalar('episode_lengths/time', mean_lengths, total_time)
                     self.writer.add_scalar('win_rate/mean', mean_scores, frame)
                     self.writer.add_scalar('win_rate/time', mean_scores, total_time)
+
+                    self.game_x_speed = deque([], maxlen=self.games_to_log)
+                    self.game_height = deque([], maxlen=self.games_to_log)
+                    self.game_energy = deque([], maxlen=self.games_to_log)
+                    self.game_x_speed_reward = deque([], maxlen=self.games_to_log)
+                    self.game_height_reward = deque([], maxlen=self.games_to_log)
+                    self.game_energy_reward = deque([], maxlen=self.games_to_log)
 
                     if rep_count % 10 == 0:
                         self.save("./nn/" + 'last_' + self.config['name'] + 'ep=' + str(epoch_num) + 'rew=' + str(mean_rewards))
@@ -455,10 +481,25 @@ class ContinuousA2CBase(A2CBase):
             self.obs[:], rewards, self.dones, infos = self.vec_env.step(rescale_actions(self.actions_low, self.actions_high, np.clip(actions, -1.0, 1.0)))
             self.current_rewards += rewards
             self.current_lengths += 1
-            for reward, length, done in zip(self.current_rewards, self.current_lengths, self.dones):
+            self.current_x_speed += np.array([info['x_speed'] for info in infos])
+            self.current_height += np.array([info['height'] for info in infos])
+            self.current_energy += np.array([info['energy'] for info in infos])
+            self.current_x_speed_reward += np.array([info['x_speed_reward'] for info in infos])
+            self.current_height_reward += np.array([info['height_reward'] for info in infos])
+            self.current_energy_reward += np.array([info['energy_reward'] for info in infos])
+            for reward, length, done, info, x_speed, height, energy, x_speed_reward, height_reward, energy_reward in \
+                    zip(self.current_rewards, self.current_lengths, self.dones, infos, self.current_x_speed,
+                        self.current_height, self.current_energy, self.current_x_speed_reward,
+                        self.current_height_reward, self.current_energy_reward):
                 if done:
                     self.game_rewards.append(reward)
                     self.game_lengths.append(length)
+                    self.game_x_speed.append(x_speed / length)
+                    self.game_height.append(height / length)
+                    self.game_energy.append(energy / length)
+                    self.game_x_speed_reward.append(x_speed_reward)
+                    self.game_height_reward.append(height_reward)
+                    self.game_energy_reward.append(energy_reward)
 
             shaped_rewards = self.rewards_shaper(rewards)
             epinfos.append(infos)
@@ -473,6 +514,12 @@ class ContinuousA2CBase(A2CBase):
             
             self.current_rewards = self.current_rewards * (1.0 - self.dones)
             self.current_lengths = self.current_lengths * (1.0 - self.dones)
+            self.current_x_speed *= 1.0 - self.dones
+            self.current_height *= 1.0 - self.dones
+            self.current_energy *= 1.0 - self.dones
+            self.current_x_speed_reward *= 1.0 - self.dones
+            self.current_height_reward *= 1.0 - self.dones
+            self.current_energy_reward *= 1.0 - self.dones
 
         last_values = self.get_values(self.obs)
         last_values = np.squeeze(last_values)
@@ -626,6 +673,13 @@ class ContinuousA2CBase(A2CBase):
                 self.writer.add_scalar('info/e_clip', self.e_clip * lr_mul, frame)
                 self.writer.add_scalar('info/kl', np.mean(kls), frame)
                 self.writer.add_scalar('epochs', epoch_num, frame)
+
+                self.writer.add_scalar('info/x_speed', np.mean(self.game_x_speed), frame)
+                self.writer.add_scalar('info/height', np.mean(self.game_height), frame)
+                self.writer.add_scalar('info/energy', np.mean(self.game_energy), frame)
+                self.writer.add_scalar('rewards/x_speed', np.mean(self.game_x_speed_reward), frame)
+                self.writer.add_scalar('rewards/height', np.mean(self.game_height_reward), frame)
+                self.writer.add_scalar('rewards/energy', np.mean(self.game_energy_reward), frame)
                 
                 if len(self.game_rewards) > 0:
                     mean_rewards = np.mean(self.game_rewards)
